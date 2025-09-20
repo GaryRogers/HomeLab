@@ -18,6 +18,7 @@
     # Firewall configuration variables
     local_network: "192.168.4.0/24"
     ssh_port: 22
+    k3s_port: 8080
     firewall_enabled: true
     logging_level: "medium"  # off, low, medium, high, full
     
@@ -74,6 +75,17 @@
       tags:
         - firewall
         - ssh
+    
+    - name: Allow k3s API port from local network
+      ufw:
+        rule: allow
+        port: "{{ k3s_port }}"
+        proto: tcp
+        src: "{{ local_network }}"
+        comment: "Allow k3s API port from local network"
+      tags:
+        - firewall
+        - k3s
 
     - name: Allow loopback traffic
       ufw:

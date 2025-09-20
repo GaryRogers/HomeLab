@@ -115,8 +115,9 @@
         - systemd
 
 # Import individual service playbooks
-- import_playbook: bonjour.yaml
 - import_playbook: firewall.yaml
+- import_playbook: bonjour.yaml
+- import_playbook: k3s.yaml
 
 # Add more playbook imports here as you create them
 # Example structure for future playbooks:

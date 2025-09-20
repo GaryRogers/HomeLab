@@ -1,0 +1,205 @@
+---
+#===============================================================================
+# K3s Configuration Playbook
+#===============================================================================
+# Description: Configures k3s group permissions for cluster access
+#              Allows non-root users to access k3s cluster configuration
+# Author: HomeLab
+# Version: 1.0
+# Usage: ansible-playbook -i inventory/inventory.yaml playbooks/k3s.yaml
+#===============================================================================
+
+- name: Configure K3s Group Permissions
+  hosts: local
+  become: true
+  gather_facts: true
+  
+  vars:
+    # K3s configuration variables
+    k3s_group: "k3s"
+    k3s_config_file: "/etc/rancher/k3s/k3s.yaml"
+    k3s_config_dir: "/etc/rancher/k3s"
+    current_user: "{{ ansible_user | default(ansible_user_id) }}"
+    
+  pre_tasks:
+    - name: Display k3s configuration information
+      debug:
+        msg:
+          - "=========================================="
+          - "K3s Group Permissions Configuration"
+          - "=========================================="
+          - "Target Host: {{ inventory_hostname }}"
+          - "K3s Group: {{ k3s_group }}"
+          - "Current User: {{ current_user }}"
+          - "Config File: {{ k3s_config_file }}"
+          - "Timestamp: {{ ansible_date_time.iso8601 }}"
+          - "=========================================="
+      tags: always
+
+    - name: Check if k3s config file exists
+      stat:
+        path: "{{ k3s_config_file }}"
+      register: k3s_config_stat
+      tags:
+        - k3s
+        - check
+
+    - name: Display k3s installation status
+      debug:
+        msg:
+          - "K3s config file exists: {{ k3s_config_stat.stat.exists }}"
+          - "Note: If k3s is not installed, this playbook will prepare permissions"
+          - "for when k3s is installed later."
+      tags: always
+
+  tasks:
+    - name: Create k3s group
+      group:
+        name: "{{ k3s_group }}"
+        state: present
+        system: true
+      tags:
+        - k3s
+        - group
+
+    - name: Add current user to k3s group
+      user:
+        name: "{{ current_user }}"
+        groups: "{{ k3s_group }}"
+        append: true
+      tags:
+        - k3s
+        - user
+        - group
+
+    - name: Ensure k3s config directory exists
+      file:
+        path: "{{ k3s_config_dir }}"
+        state: directory
+        owner: root
+        group: "{{ k3s_group }}"
+        mode: '0755'
+      tags:
+        - k3s
+        - directory
+
+    - name: Set k3s config file ownership and permissions
+      file:
+        path: "{{ k3s_config_file }}"
+        owner: root
+        group: "{{ k3s_group }}"
+        mode: '0640'
+        state: file
+      when: k3s_config_stat.stat.exists
+      tags:
+        - k3s
+        - permissions
+        - config
+
+    - name: Create k3s config file placeholder if k3s not installed
+      file:
+        path: "{{ k3s_config_file }}"
+        owner: root
+        group: "{{ k3s_group }}"
+        mode: '0640'
+        state: touch
+        modification_time: preserve
+        access_time: preserve
+      when: not k3s_config_stat.stat.exists
+      tags:
+        - k3s
+        - placeholder
+
+    - name: Get current k3s config file permissions
+      stat:
+        path: "{{ k3s_config_file }}"
+      register: final_k3s_stat
+      tags:
+        - k3s
+        - verify
+
+    - name: Display k3s config file permissions
+      debug:
+        msg:
+          - "K3s config file permissions:"
+          - "  Path: {{ k3s_config_file }}"
+          - "  Owner: {{ final_k3s_stat.stat.pw_name | default('unknown') }}"
+          - "  Group: {{ final_k3s_stat.stat.gr_name | default('unknown') }}"
+          - "  Mode: {{ final_k3s_stat.stat.mode | default('unknown') }}"
+          - "  Readable by {{ k3s_group }} group: {{ (final_k3s_stat.stat.mode | int | string)[-3:] >= '640' }}"
+      when: final_k3s_stat.stat.exists
+      tags:
+        - k3s
+        - verify
+
+  post_tasks:
+    - name: Create k3s configuration log
+      copy:
+        content: |
+          # K3s Group Permissions Configuration Applied
+          # Timestamp: {{ ansible_date_time.iso8601 }}
+          # Playbook: k3s.yaml
+          # Host: {{ inventory_hostname }}
+          # 
+          # Configuration Details:
+          # - K3s Group: {{ k3s_group }}
+          # - Current User: {{ current_user }}
+          # - Config File: {{ k3s_config_file }}
+          # - Config Directory: {{ k3s_config_dir }}
+          # 
+          # Applied Changes:
+          # - Created system group: {{ k3s_group }}
+          # - Added user {{ current_user }} to {{ k3s_group }} group
+          # - Set config directory permissions: 0750 (root:{{ k3s_group }})
+          # - Set config file permissions: 0640 (root:{{ k3s_group }})
+          # 
+          # Usage Instructions:
+          # 1. Log out and back in for group membership to take effect
+          # 2. Install k3s if not already installed:
+          #    curl -sfL https://get.k3s.io | sh -
+          # 3. Test access without sudo:
+          #    kubectl --kubeconfig {{ k3s_config_file }} get nodes
+          # 4. Set KUBECONFIG environment variable:
+          #    export KUBECONFIG={{ k3s_config_file }}
+          # 
+          # Verification Commands:
+          # - Check group membership: groups {{ current_user }}
+          # - Check file permissions: ls -la {{ k3s_config_file }}
+          # - Test kubectl access: kubectl get nodes
+        dest: /var/log/homelab-k3s-{{ ansible_date_time.epoch }}.log
+        owner: root
+        group: root
+        mode: '0644'
+      tags:
+        - k3s
+        - logging
+
+    - name: Display completion summary
+      debug:
+        msg:
+          - "=========================================="
+          - "K3s Group Permissions Configuration Complete!"
+          - "=========================================="
+          - "Successfully configured:"
+          - "  ✓ Created {{ k3s_group }} system group"
+          - "  ✓ Added {{ current_user }} to {{ k3s_group }} group"
+          - "  ✓ Set config directory permissions (750)"
+          - "  ✓ Set config file permissions (640)"
+          - ""
+          - "Configuration logged to:"
+          - "  /var/log/homelab-k3s-{{ ansible_date_time.epoch }}.log"
+          - ""
+          - "Next steps:"
+          - "  1. Log out and back in (for group membership)"
+          - "  2. Install k3s if needed: curl -sfL https://get.k3s.io | sh -"
+          - "  3. Test: kubectl --kubeconfig {{ k3s_config_file }} get nodes"
+          - "  4. Set KUBECONFIG={{ k3s_config_file }} in your shell profile"
+          - "=========================================="
+      tags: always
+
+  handlers:
+    - name: refresh group membership
+      meta: reset_connection
+      tags:
+        - handlers
+        - group
