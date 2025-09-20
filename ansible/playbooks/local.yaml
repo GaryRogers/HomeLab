@@ -1,0 +1,125 @@
+---
+#===============================================================================
+# Local HomeLab Configuration Playbook
+#===============================================================================
+# Description: Master playbook for managing local HomeLab services and
+#              configuration drift across all included playbooks
+# Author: HomeLab
+# Version: 1.0
+# Usage: ansible-playbook -i inventory/inventory.yaml playbooks/local.yaml
+#===============================================================================
+
+- name: "HomeLab Local Configuration Management"
+  hosts: local
+  become: true
+  gather_facts: true
+  
+  vars:
+    # Global variables for local configuration
+    homelab_user: "{{ ansible_user | default('ubuntu') }}"
+    homelab_group: "{{ homelab_user }}"
+    homelab_services_enabled: true
+    homelab_config_backup: true
+    
+  pre_tasks:
+    - name: Display playbook information
+      debug:
+        msg:
+          - "=========================================="
+          - "HomeLab Local Configuration Playbook"
+          - "=========================================="
+          - "Target Host: {{ inventory_hostname }}"
+          - "Operating System: {{ ansible_distribution }} {{ ansible_distribution_version }}"
+          - "User: {{ homelab_user }}"
+          - "Timestamp: {{ ansible_date_time.iso8601 }}"
+          - "=========================================="
+      tags: always
+
+    - name: Update package cache
+      apt:
+        update_cache: true
+        cache_valid_time: 3600
+      tags: 
+        - packages
+        - update
+
+    - name: Ensure essential packages are installed
+      package:
+        name:
+          - curl
+          - wget
+          - git
+          - unzip
+          - htop
+          - vim
+          - net-tools
+          - wakeonlan
+        state: present
+      tags: 
+        - packages
+        - essential
+
+  tasks:
+    - name: Create configuration baseline
+      debug:
+        msg: "Starting HomeLab local configuration tasks"
+      tags: always
+
+  post_tasks:
+    - name: Create configuration backup timestamp
+      copy:
+        content: |
+          # HomeLab Configuration Applied
+          # Timestamp: {{ ansible_date_time.iso8601 }}
+          # Playbook: local.yaml
+          # Host: {{ inventory_hostname }}
+          # User: {{ homelab_user }}
+          # 
+          # Applied configurations:
+          # - Base system packages
+          # - Essential tools
+          # 
+          # Imported playbooks will be logged separately
+        dest: /var/log/homelab-config-{{ ansible_date_time.epoch }}.log
+        owner: root
+        group: root
+        mode: '0644'
+      when: homelab_config_backup
+      tags: 
+        - backup
+        - logging
+
+    - name: Display completion summary
+      debug:
+        msg:
+          - "=========================================="
+          - "HomeLab Base Configuration Complete!"
+          - "=========================================="
+          - "Successfully applied configurations:"
+          - "  ✓ Essential system packages"
+          - "  ✓ Base system tools"
+          - ""
+          - "Configuration logged to:"
+          - "  /var/log/homelab-config-{{ ansible_date_time.epoch }}.log"
+          - ""
+          - "Note: Individual playbooks will run after this"
+          - "=========================================="
+      tags: always
+
+  handlers:
+    - name: reload systemd
+      systemd:
+        daemon_reload: true
+      tags:
+        - handlers
+        - systemd
+
+# Import individual service playbooks
+- import_playbook: bonjour.yaml
+
+# Add more playbook imports here as you create them
+# Example structure for future playbooks:
+#
+# - import_playbook: docker.yaml
+# - import_playbook: monitoring.yaml
+# - import_playbook: backup.yaml
