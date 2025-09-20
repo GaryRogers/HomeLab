@@ -14,3 +14,11 @@ curl -sfL https://get.k3s.io | sh -
 
 systemctl status k3s
 ```
+
+## Helm Repos
+
+```bash
+export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
+```
+
+[open-webui](https://artifacthub.io/packages/helm/open-webui/open-webui)

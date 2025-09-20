@@ -1,0 +1,201 @@
+---
+#===============================================================================
+# Helm Installation Playbook
+#===============================================================================
+# Description: Installs Helm package manager for Kubernetes using the official
+#              installation script from the Helm project
+# Author: HomeLab
+# Version: 1.0
+# Usage: ansible-playbook -i inventory/inventory.yaml playbooks/helm.yaml
+#===============================================================================
+
+- name: Install Helm Package Manager
+  hosts: local
+  become: true
+  gather_facts: true
+  
+  vars:
+    # Helm installation variables
+    helm_script_url: "https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3"
+    helm_script_path: "/tmp/get_helm.sh"
+    helm_install_dir: "/usr/local/bin"
+    helm_user: "{{ ansible_user | default(ansible_user_id) }}"
+    
+  pre_tasks:
+    - name: Display helm installation information
+      debug:
+        msg:
+          - "=========================================="
+          - "Helm Package Manager Installation"
+          - "=========================================="
+          - "Target Host: {{ inventory_hostname }}"
+          - "Installation User: {{ helm_user }}"
+          - "Script URL: {{ helm_script_url }}"
+          - "Install Directory: {{ helm_install_dir }}"
+          - "Timestamp: {{ ansible_date_time.iso8601 }}"
+          - "=========================================="
+      tags: always
+
+    - name: Check if Helm is already installed
+      command: helm version --short
+      register: helm_version_check
+      failed_when: false
+      changed_when: false
+      tags:
+        - helm
+        - check
+
+    - name: Display current Helm status
+      debug:
+        msg:
+          - "Helm installation status:"
+          - "  Installed: {{ helm_version_check.rc == 0 }}"
+          - "  Version: {{ helm_version_check.stdout | default('Not installed') }}"
+      tags: always
+
+  tasks:
+    - name: Install required packages for Helm installation
+      package:
+        name:
+          - curl
+          - ca-certificates
+        state: present
+      tags:
+        - helm
+        - packages
+
+    - name: Download Helm installation script
+      get_url:
+        url: "{{ helm_script_url }}"
+        dest: "{{ helm_script_path }}"
+        mode: '0700'
+        owner: root
+        group: root
+        timeout: 30
+      when: helm_version_check.rc != 0
+      tags:
+        - helm
+        - download
+
+    - name: Verify Helm installation script was downloaded
+      stat:
+        path: "{{ helm_script_path }}"
+      register: helm_script_stat
+      when: helm_version_check.rc != 0
+      tags:
+        - helm
+        - verify
+
+    - name: Execute Helm installation script
+      command: "{{ helm_script_path }}"
+      environment:
+        HELM_INSTALL_DIR: "{{ helm_install_dir }}"
+      register: helm_install_result
+      when: 
+        - helm_version_check.rc != 0
+        - helm_script_stat.stat.exists | default(false)
+      tags:
+        - helm
+        - install
+
+    - name: Display Helm installation output
+      debug:
+        var: helm_install_result.stdout_lines
+      when: helm_install_result is defined and helm_install_result.stdout_lines is defined
+      tags:
+        - helm
+        - install
+
+    - name: Clean up installation script
+      file:
+        path: "{{ helm_script_path }}"
+        state: absent
+      when: helm_version_check.rc != 0
+      tags:
+        - helm
+        - cleanup
+
+    - name: Verify Helm installation
+      command: helm version --short
+      register: helm_final_version
+      changed_when: false
+      tags:
+        - helm
+        - verify
+
+    - name: Display final Helm version
+      debug:
+        msg:
+          - "Helm installation verification:"
+          - "  Status: Successfully installed"
+          - "  Version: {{ helm_final_version.stdout }}"
+          - "  Location: {{ helm_install_dir }}/helm"
+      tags:
+        - helm
+        - verify
+
+  post_tasks:
+    - name: Create Helm installation log
+      copy:
+        content: |
+          # Helm Package Manager Installation Applied
+          # Timestamp: {{ ansible_date_time.iso8601 }}
+          # Playbook: helm.yaml
+          # Host: {{ inventory_hostname }}
+          # 
+          # Installation Details:
+          # - Script URL: {{ helm_script_url }}
+          # - Install Directory: {{ helm_install_dir }}
+          # - Installation User: {{ helm_user }}
+          # - Helm Version: {{ helm_final_version.stdout | default('Unknown') }}
+          # 
+          # Configured Repositories:
+          # 
+          # Common Helm Commands:
+          # - Check version: helm version
+          # - List repositories: helm repo list
+          # - Search charts: helm search repo <keyword>
+          # - Install chart: helm install <name> <chart>
+          # - List releases: helm list
+          # - Upgrade release: helm upgrade <name> <chart>
+          # - Uninstall release: helm uninstall <name>
+          # 
+          # Popular Chart Repositories:
+          # - helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+          # - helm repo add grafana https://grafana.github.io/helm-charts
+          # - helm repo add ingress-nginx https://kubernetes.github.io/ingress-nginx
+          # - helm repo add jetstack https://charts.jetstack.io
+        dest: /var/log/homelab-helm-{{ ansible_date_time.epoch }}.log
+        owner: root
+        group: root
+        mode: '0644'
+      tags:
+        - helm
+        - logging
+
+    - name: Display completion summary
+      debug:
+        msg:
+          - "=========================================="
+          - "Helm Package Manager Installation Complete!"
+          - "=========================================="
+          - "Successfully installed:"
+          - "  ✓ Helm {{ helm_final_version.stdout | default('latest version') }}"
+          - "  ✓ Helm binary in {{ helm_install_dir }}/helm"
+          - "  ✓ Basic Helm repositories configured"
+          - ""
+          - "Configuration logged to:"
+          - "  /var/log/homelab-helm-{{ ansible_date_time.epoch }}.log"
+          - ""
+          - "Next steps:"
+          - "  1. Verify: helm version"
+          - "  2. List repos: helm repo list"
+          - "  3. Search charts: helm search repo <keyword>"
+          - "  4. Install your first chart!"
+          - ""
+          - "Prerequisites for Helm usage:"
+          - "  • K3s cluster running"
+          - "  • KUBECONFIG properly configured"
+          - "  • kubectl access to cluster"
+          - "=========================================="
+      tags: always
