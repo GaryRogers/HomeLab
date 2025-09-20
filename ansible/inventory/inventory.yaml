@@ -1,0 +1,10 @@
+all:
+  children:
+    server:
+      hosts:
+        homelab:
+          ansible_host: 192.168.4.100
+    local:
+      hosts:
+        localhost:
+          ansible_connection: local

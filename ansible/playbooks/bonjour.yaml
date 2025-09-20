@@ -1,0 +1,114 @@
+---
+# Bonjour/mDNS Configuration Playbook
+# Configures Avahi for service discovery on .local domain
+# Author: HomeLab
+# Version: 1.0
+
+- name: Configure Bonjour/mDNS Services
+  hosts: local
+  become: true
+  vars:
+    hostname_override: "{{ inventory_hostname }}"
+    services_to_advertise:
+      - name: "ssh"
+        port: 22
+        protocol: "tcp"
+        description: "SSH Remote Login"
+      - name: "sftp-ssh"
+        port: 22
+        protocol: "tcp" 
+        description: "SFTP File Transfer"
+
+  tasks:
+    - name: Update package cache
+      apt:
+        update_cache: yes
+        cache_valid_time: 3600
+      tags: [packages]
+
+    - name: Install Avahi packages
+      apt:
+        name:
+          - avahi-daemon
+          - avahi-utils
+          - libnss-mdns
+        state: present
+      tags: [packages]
+
+    - name: Configure Avahi daemon
+      template:
+        src: bonjour/avahi-daemon.conf.j2
+        dest: /etc/avahi/avahi-daemon.conf
+        backup: yes
+        owner: root
+        group: root
+        mode: '0644'
+      notify: restart avahi-daemon
+      tags: [config]
+
+    - name: Create SSH service advertisement
+      template:
+        src: bonjour/ssh.service.j2
+        dest: /etc/avahi/services/ssh.service
+        owner: root
+        group: root
+        mode: '0644'
+      notify: restart avahi-daemon
+      tags: [services]
+
+    - name: Create SFTP service advertisement
+      template:
+        src: bonjour/sftp.service.j2
+        dest: /etc/avahi/services/sftp.service
+        owner: root
+        group: root
+        mode: '0644'
+      notify: restart avahi-daemon
+      tags: [services]
+
+    - name: Ensure Avahi daemon is enabled and started
+      systemd:
+        name: avahi-daemon
+        enabled: yes
+        state: started
+      tags: [service]
+
+    - name: Configure NSS to use mDNS
+      lineinfile:
+        path: /etc/nsswitch.conf
+        regexp: '^hosts:'
+        line: 'hosts:          files mdns4_minimal [NOTFOUND=return] dns'
+        backup: yes
+      tags: [config]
+
+    - name: Test mDNS resolution
+      command: avahi-resolve -n {{ hostname_override }}.local
+      register: mdns_test
+      failed_when: false
+      changed_when: false
+      tags: [test]
+
+    - name: Display mDNS test results
+      debug:
+        msg: |
+          mDNS Resolution Test:
+          Command: avahi-resolve -n {{ hostname_override }}.local
+          Return Code: {{ mdns_test.rc }}
+          Output: {{ mdns_test.stdout }}
+          {% if mdns_test.rc == 0 %}
+          ✅ Success: {{ hostname_override }}.local is resolvable
+          {% else %}
+          ❌ Failed: {{ hostname_override }}.local is not resolvable
+          {% endif %}
+      tags: [test]
+
+  handlers:
+    - name: restart avahi-daemon
+      systemd:
+        name: avahi-daemon
+        state: restarted
+
+    - name: reload avahi-daemon
+      systemd:
+        name: avahi-daemon
+        state: reloaded

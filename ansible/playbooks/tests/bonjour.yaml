@@ -1,0 +1,41 @@
+---
+# Test Bonjour/mDNS Configuration
+# Verifies that services are properly advertised
+
+- name: Test Bonjour/mDNS Services
+  hosts: local
+  become: yes
+  tasks:
+    - name: Check Avahi daemon status
+      systemd:
+        name: avahi-daemon
+      register: avahi_status
+
+    - name: Display Avahi status
+      debug:
+        msg: "Avahi daemon is {{ avahi_status.status.ActiveState }}"
+
+    - name: List advertised services
+      command: avahi-browse -at
+      register: avahi_services
+      changed_when: false
+
+    - name: Display advertised services
+      debug:
+        msg: "{{ avahi_services.stdout_lines }}"
+
+    - name: Test hostname resolution
+      command: avahi-resolve -n {{ inventory_hostname }}.local
+      register: hostname_resolution
+      failed_when: false
+      changed_when: false
+
+    - name: Display hostname resolution
+      debug:
+        msg: |
+          Hostname Resolution: {{ inventory_hostname }}.local
+          {% if hostname_resolution.rc == 0 %}
+          ✅ Resolved to: {{ hostname_resolution.stdout }}
+          {% else %}
+          ❌ Resolution failed: {{ hostname_resolution.stderr }}
+          {% endif %}
