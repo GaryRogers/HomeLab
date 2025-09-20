@@ -117,6 +117,7 @@
 # Import individual service playbooks
 - import_playbook: firewall.yaml
 - import_playbook: bonjour.yaml
+- import_playbook: smb.yaml
 - import_playbook: k3s.yaml
 - import_playbook: helm.yaml
 

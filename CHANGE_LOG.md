@@ -10,3 +10,5 @@
 - Added 8080 (k3s API) to the firewall
 - Added a [k3s.yaml](ansible/playbooks/k3s.yaml) playbook just to handle the permissions on the config file for k3s
 - Added an [ingress file](ansible/files/open-webui-ingress.yaml) for open-webui. The Helm chart install of Open WebUI didn't include one.
+- Added ansible files from the server. I think copilot created them when I was in another VS Code session.
+- Added Bonjor configs for SMB and K3s ingress.

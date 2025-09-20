@@ -1,0 +1,356 @@
+---
+#===============================================================================
+# SMB/Samba Configuration Playbook
+#===============================================================================
+# Description: Configures Samba server for local user file sharing
+#              Sets up /opt/shared directory accessible via SMB protocol
+# Author: HomeLab
+# Version: 1.0
+# Usage: ansible-playbook -i inventory/inventory.yaml playbooks/smb.yaml
+#===============================================================================
+
+- name: Configure SMB/Samba File Sharing
+  hosts: local
+  become: true
+  gather_facts: true
+  
+  vars:
+    # SMB configuration variables
+    smb_workgroup: "WORKGROUP"
+    smb_server_string: "HomeLab SMB Server"
+    smb_shared_directory: "/opt/shared"
+    smb_share_name: "shared"
+    smb_valid_users: "{{ ansible_user }},@users"  # Allow ansible user and users group
+    smb_create_mask: "0664"
+    smb_directory_mask: "0775"
+    smb_guest_ok: false
+    smb_browseable: true
+    smb_writable: true
+    
+  pre_tasks:
+    - name: Display SMB configuration information
+      debug:
+        msg:
+          - "=========================================="
+          - "SMB/Samba File Sharing Configuration"
+          - "=========================================="
+          - "Target Host: {{ inventory_hostname }}"
+          - "Workgroup: {{ smb_workgroup }}"
+          - "Shared Directory: {{ smb_shared_directory }}"
+          - "Share Name: {{ smb_share_name }}"
+          - "Timestamp: {{ ansible_date_time.iso8601 }}"
+          - "=========================================="
+      tags: always
+
+  tasks:
+    - name: Install Samba packages
+      package:
+        name:
+          - samba
+          - samba-common-bin
+          - smbclient
+          - samba-vfs-modules  # For macOS compatibility (vfs_fruit)
+        state: present
+      tags:
+        - smb
+        - packages
+
+    - name: Create shared directory
+      file:
+        path: "{{ smb_shared_directory }}"
+        state: directory
+        owner: root
+        group: users
+        mode: '0775'
+      tags:
+        - smb
+        - directories
+
+    - name: Backup original Samba configuration
+      copy:
+        src: /etc/samba/smb.conf
+        dest: "/etc/samba/smb.conf.backup.{{ ansible_date_time.epoch }}"
+        remote_src: true
+        backup: true
+      tags:
+        - smb
+        - backup
+
+    - name: Configure Samba global settings
+      blockinfile:
+        path: /etc/samba/smb.conf
+        marker: "# {mark} HOMELAB SMB GLOBAL CONFIG"
+        insertafter: "^\\[global\\]"
+        block: |
+          # HomeLab SMB Configuration
+          workgroup = {{ smb_workgroup }}
+          server string = {{ smb_server_string }}
+          netbios name = {{ ansible_hostname | upper }}
+          
+          # Security settings
+          security = user
+          map to guest = never
+          guest account = nobody
+          passdb backend = tdbsam
+          
+          # Network settings
+          interfaces = lo 192.168.4.0/24
+          bind interfaces only = yes
+          
+          # Name resolution and compatibility
+          name resolve order = lmhosts wins host bcast
+          dns proxy = no
+          
+          # Disable DFS to avoid path parsing issues
+          host msdfs = no
+          
+          # Logging
+          log file = /var/log/samba/log.%m
+          max log size = 1000
+          log level = 1
+          
+          # Performance and compatibility
+          socket options = TCP_NODELAY IPTOS_LOWDELAY SO_RCVBUF=131072 SO_SNDBUF=131072
+          use sendfile = yes
+          
+          # macOS compatibility
+          fruit:metadata = stream
+          fruit:model = MacSamba
+          fruit:posix_rename = yes
+          fruit:veto_appledouble = no
+          fruit:wipe_intentionally_left_blank_rfork = yes
+          fruit:delete_empty_adfiles = yes
+          
+          # Disable printer sharing by default
+          load printers = no
+          printing = bsd
+          printcap name = /dev/null
+          disable spoolss = yes
+      notify: restart samba
+      tags:
+        - smb
+        - configuration
+
+    - name: Configure shared directory in Samba
+      blockinfile:
+        path: /etc/samba/smb.conf
+        marker: "# {mark} HOMELAB SHARED DIRECTORY"
+        block: |
+          [{{ smb_share_name }}]
+             comment = HomeLab Shared Directory
+             path = {{ smb_shared_directory }}
+             browseable = {{ smb_browseable | lower }}
+             writable = {{ smb_writable | lower }}
+             guest ok = {{ smb_guest_ok | lower }}
+             valid users = {{ smb_valid_users }}
+             create mask = {{ smb_create_mask }}
+             directory mask = {{ smb_directory_mask }}
+             force group = users
+             force create mode = 0664
+             force directory mode = 0775
+             
+             # macOS compatibility
+             vfs objects = catia fruit streams_xattr
+             fruit:metadata = stream
+             fruit:model = MacSamba
+             fruit:posix_rename = yes
+             fruit:veto_appledouble = no
+             fruit:wipe_intentionally_left_blank_rfork = yes
+             fruit:delete_empty_adfiles = yes
+      notify: restart samba
+      tags:
+        - smb
+        - configuration
+
+    - name: Test Samba configuration syntax
+      command: testparm -s
+      register: testparm_result
+      changed_when: false
+      failed_when: testparm_result.rc != 0
+      tags:
+        - smb
+        - validation
+
+    - name: Enable and start Samba services
+      systemd:
+        name: "{{ item }}"
+        enabled: true
+        state: started
+      loop:
+        - smbd
+        - nmbd
+      tags:
+        - smb
+        - services
+
+    - name: Ensure ansible user is in users group
+      user:
+        name: "{{ ansible_user }}"
+        groups: users
+        append: yes
+      tags:
+        - smb
+        - users
+
+    - name: Check if ansible user already has SMB password
+      shell: pdbedit -L | grep "{{ ansible_user }}:"
+      register: smb_user_exists
+      failed_when: false
+      changed_when: false
+      tags:
+        - smb
+        - users
+
+    - name: Add ansible user to SMB (with random password)
+      shell: |
+        echo -e "{{ ansible_user }}\n{{ ansible_user }}" | smbpasswd -a {{ ansible_user }} -s
+      when: smb_user_exists.rc != 0
+      tags:
+        - smb
+        - users
+        - never  # Only run when explicitly tagged
+
+    - name: Display SMB user management instructions
+      debug:
+        msg:
+          - "=========================================="
+          - "SMB User Management Instructions"
+          - "=========================================="
+          - "To add users to SMB access:"
+          - "  1. Add user to system: sudo useradd -m <username>"
+          - "  2. Add user to users group: sudo usermod -a -G users <username>"
+          - "  3. Set SMB password: sudo smbpasswd -a <username>"
+          - ""
+          - "To add current user '{{ ansible_user }}' to SMB:"
+          - "  sudo smbpasswd -a {{ ansible_user }}"
+          - ""
+          - "To list SMB users:"
+          - "  sudo pdbedit -L"
+          - "=========================================="
+      tags:
+        - smb
+        - users
+
+    - name: Check if UFW is active
+      command: ufw status
+      register: ufw_status
+      changed_when: false
+      failed_when: false
+      tags:
+        - smb
+        - firewall
+
+    - name: Allow Samba through firewall
+      ufw:
+        rule: allow
+        port: "{{ item }}"
+        src: "192.168.4.0/24"
+      loop:
+        - "139"
+        - "445"
+      when: "'Status: active' in ufw_status.stdout"
+      tags:
+        - smb
+        - firewall
+
+    - name: Display SMB service status
+      command: systemctl status smbd nmbd --no-pager -l
+      register: smb_status
+      changed_when: false
+      tags:
+        - smb
+        - status
+
+    - name: Show SMB shares
+      command: smbclient -L localhost -N
+      register: smb_shares
+      changed_when: false
+      failed_when: false
+      tags:
+        - smb
+        - validation
+
+  post_tasks:
+    - name: Create SMB configuration summary
+      copy:
+        content: |
+          # HomeLab SMB Configuration Applied
+          # Timestamp: {{ ansible_date_time.iso8601 }}
+          # Playbook: smb.yaml
+          # Host: {{ inventory_hostname }}
+          # 
+          # SMB Configuration Details:
+          # - Workgroup: {{ smb_workgroup }}
+          # - Server String: {{ smb_server_string }}
+          # - Shared Directory: {{ smb_shared_directory }}
+          # - Share Name: {{ smb_share_name }}
+          # - Valid Users: {{ smb_valid_users }}
+          # 
+          # Services Status:
+          # - smbd: enabled and started
+          # - nmbd: enabled and started
+          # 
+          # Firewall Rules Added:
+          # - Port 139 (NetBIOS Session Service)
+          # - Port 445 (SMB over TCP)
+          # - Source: 192.168.4.0/24 (local network)
+          # 
+          # Usage Instructions:
+          # 1. Add local users to SMB: sudo smbpasswd -a <username>
+          # 2. Add users to users group: sudo usermod -a -G users <username>
+          # 3. Access from Windows: \\{{ ansible_default_ipv4.address }}\{{ smb_share_name }}
+          # 4. Access from Linux: smb://{{ ansible_default_ipv4.address }}/{{ smb_share_name }}
+          # 5. Access from macOS: smb://{{ ansible_default_ipv4.address }}/{{ smb_share_name }}
+          # 6. Mount command: sudo mount -t cifs //{{ ansible_default_ipv4.address }}/{{ smb_share_name }} /mnt/point -o username=<user>
+          #
+          # Troubleshooting:
+          # - Check SMB users: sudo pdbedit -L
+          # - Test config: sudo testparm
+          # - Check logs: sudo tail -f /var/log/samba/log.*
+        dest: /var/log/homelab-smb-config-{{ ansible_date_time.epoch }}.log
+        owner: root
+        group: root
+        mode: '0644'
+      tags: 
+        - smb
+        - backup
+        - logging
+
+    - name: Display completion summary
+      debug:
+        msg:
+          - "=========================================="
+          - "SMB/Samba Configuration Complete!"
+          - "=========================================="
+          - "Successfully configured:"
+          - "  ✓ Samba server installed and configured"
+          - "  ✓ Shared directory: {{ smb_shared_directory }}"
+          - "  ✓ SMB share: {{ smb_share_name }}"
+          - "  ✓ Firewall rules added (ports 139, 445)"
+          - "  ✓ Services enabled: smbd, nmbd"
+          - ""
+          - "Next Steps:"
+          - "  1. Add users to SMB: sudo smbpasswd -a <username>"
+          - "  2. Add users to group: sudo usermod -a -G users <username>"
+          - "  3. Access share: smb://{{ ansible_default_ipv4.address }}/{{ smb_share_name }}"
+          - ""
+          - "For user 'grogers' specifically:"
+          - "  sudo smbpasswd -a grogers"
+          - "  sudo usermod -a -G users grogers"
+          - ""
+          - "Configuration logged to:"
+          - "  /var/log/homelab-smb-config-{{ ansible_date_time.epoch }}.log"
+          - "=========================================="
+      tags: always
+
+  handlers:
+    - name: restart samba
+      systemd:
+        name: "{{ item }}"
+        state: restarted
+      loop:
+        - smbd
+        - nmbd
+      tags:
+        - smb
+        - handlers

@@ -18,6 +18,14 @@
         port: 22
         protocol: "tcp" 
         description: "SFTP File Transfer"
+      - name: "smb"
+        port: 445
+        protocol: "tcp"
+        description: "SMB File Sharing"
+      - name: "k3s-http"
+        port: 8080
+        protocol: "tcp"
+        description: "K3s Ingress Web Services"
 
   tasks:
     - name: Update package cache
@@ -66,6 +74,26 @@
       notify: restart avahi-daemon
       tags: [services]
 
+    - name: Create SMB service advertisement
+      template:
+        src: bonjour/smb.service.j2
+        dest: /etc/avahi/services/smb.service
+        owner: root
+        group: root
+        mode: '0644'
+      notify: restart avahi-daemon
+      tags: [services]
+
+    - name: Create K3s HTTP service advertisement
+      template:
+        src: bonjour/k3s-http.service.j2
+        dest: /etc/avahi/services/k3s-http.service
+        owner: root
+        group: root
+        mode: '0644'
+      notify: restart avahi-daemon
+      tags: [services]
+
     - name: Ensure Avahi daemon is enabled and started
       systemd:
         name: avahi-daemon
@@ -88,6 +116,13 @@
       changed_when: false
       tags: [test]
 
+    - name: List all advertised services
+      command: avahi-browse -a -t
+      register: avahi_services
+      failed_when: false
+      changed_when: false
+      tags: [test]
+
     - name: Display mDNS test results
       debug:
         msg: |
@@ -100,6 +135,15 @@
           {% else %}
           ❌ Failed: {{ hostname_override }}.local is not resolvable
           {% endif %}
+          
+          Advertised Services:
+          {{ avahi_services.stdout }}
+          
+          Service Discovery URLs:
+          • SSH: ssh://{{ hostname_override }}.local:22
+          • SFTP: sftp://{{ hostname_override }}.local:22
+          • SMB: smb://{{ hostname_override }}.local/shared
+          • K3s Web: http://{{ hostname_override }}.local:8080
       tags: [test]
 
   handlers:
