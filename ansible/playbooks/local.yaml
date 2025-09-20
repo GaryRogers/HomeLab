@@ -116,6 +116,7 @@
 
 # Import individual service playbooks
 - import_playbook: bonjour.yaml
+- import_playbook: firewall.yaml
 
 # Add more playbook imports here as you create them
 # Example structure for future playbooks:

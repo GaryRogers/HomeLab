@@ -1,0 +1,194 @@
+---
+#===============================================================================
+# Firewall Configuration Playbook
+#===============================================================================
+# Description: Configures UFW (Ubuntu Firewall) with basic security rules
+#              and allows SSH access from local network
+# Author: HomeLab
+# Version: 1.0
+# Usage: ansible-playbook -i inventory/inventory.yaml playbooks/firewall.yaml
+#===============================================================================
+
+- name: Configure UFW Firewall
+  hosts: local
+  become: true
+  gather_facts: true
+  
+  vars:
+    # Firewall configuration variables
+    local_network: "192.168.4.0/24"
+    ssh_port: 22
+    firewall_enabled: true
+    logging_level: "medium"  # off, low, medium, high, full
+    
+  pre_tasks:
+    - name: Display firewall configuration information
+      debug:
+        msg:
+          - "=========================================="
+          - "UFW Firewall Configuration"
+          - "=========================================="
+          - "Target Host: {{ inventory_hostname }}"
+          - "Local Network: {{ local_network }}"
+          - "SSH Port: {{ ssh_port }}"
+          - "Logging Level: {{ logging_level }}"
+          - "Timestamp: {{ ansible_date_time.iso8601 }}"
+          - "=========================================="
+      tags: always
+
+  tasks:
+    - name: Install UFW if not present
+      package:
+        name: ufw
+        state: present
+      tags:
+        - firewall
+        - packages
+
+    - name: Reset UFW to defaults
+      ufw:
+        state: reset
+      tags:
+        - firewall
+        - reset
+
+    - name: Configure UFW default policies
+      ufw:
+        direction: "{{ item.direction }}"
+        policy: "{{ item.policy }}"
+      loop:
+        - { direction: 'incoming', policy: 'deny' }
+        - { direction: 'outgoing', policy: 'allow' }
+        - { direction: 'routed', policy: 'deny' }
+      tags:
+        - firewall
+        - policy
+
+    - name: Allow SSH from local network
+      ufw:
+        rule: allow
+        port: "{{ ssh_port }}"
+        proto: tcp
+        src: "{{ local_network }}"
+        comment: "SSH access from local network"
+      tags:
+        - firewall
+        - ssh
+
+    - name: Allow loopback traffic
+      ufw:
+        rule: allow
+        interface: lo
+        direction: in
+      tags:
+        - firewall
+        - loopback
+
+    - name: Allow loopback traffic (outgoing)
+      ufw:
+        rule: allow
+        interface: lo
+        direction: out
+      tags:
+        - firewall
+        - loopback
+
+    - name: Configure UFW logging
+      ufw:
+        logging: "{{ logging_level }}"
+      tags:
+        - firewall
+        - logging
+
+    - name: Enable UFW firewall
+      ufw:
+        state: enabled
+      when: firewall_enabled
+      tags:
+        - firewall
+        - enable
+
+    - name: Get UFW status
+      command: ufw status verbose
+      register: ufw_status
+      changed_when: false
+      tags:
+        - firewall
+        - status
+
+    - name: Display UFW status
+      debug:
+        var: ufw_status.stdout_lines
+      tags:
+        - firewall
+        - status
+
+  post_tasks:
+    - name: Create firewall configuration log
+      copy:
+        content: |
+          # UFW Firewall Configuration Applied
+          # Timestamp: {{ ansible_date_time.iso8601 }}
+          # Playbook: firewall.yaml
+          # Host: {{ inventory_hostname }}
+          # 
+          # Configuration Details:
+          # - Local Network: {{ local_network }}
+          # - SSH Port: {{ ssh_port }}
+          # - Logging Level: {{ logging_level }}
+          # - Firewall Enabled: {{ firewall_enabled }}
+          # 
+          # Applied Rules:
+          # - Default incoming: DENY
+          # - Default outgoing: ALLOW
+          # - SSH ({{ ssh_port }}/tcp) from {{ local_network }}: ALLOW
+          # - Loopback interface: ALLOW
+          # 
+          # Commands for management:
+          # - Check status: sudo ufw status verbose
+          # - Add rule: sudo ufw allow from <ip> to any port <port>
+          # - Delete rule: sudo ufw delete <rule_number>
+          # - Disable: sudo ufw disable
+          # - Reset: sudo ufw --force reset
+          # 
+          # UFW Status Output:
+          {{ ufw_status.stdout }}
+        dest: /var/log/homelab-firewall-{{ ansible_date_time.epoch }}.log
+        owner: root
+        group: root
+        mode: '0644'
+      tags:
+        - firewall
+        - logging
+
+    - name: Display completion summary
+      debug:
+        msg:
+          - "=========================================="
+          - "UFW Firewall Configuration Complete!"
+          - "=========================================="
+          - "Successfully configured:"
+          - "  ✓ UFW firewall enabled"
+          - "  ✓ Default deny incoming policy"
+          - "  ✓ SSH access from {{ local_network }}"
+          - "  ✓ Loopback interface allowed"
+          - "  ✓ Logging level: {{ logging_level }}"
+          - ""
+          - "Configuration logged to:"
+          - "  /var/log/homelab-firewall-{{ ansible_date_time.epoch }}.log"
+          - ""
+          - "Security notes:"
+          - "  • Only SSH from local network is allowed"
+          - "  • All other incoming connections are blocked"
+          - "  • Outgoing connections are allowed"
+          - "  • Check 'sudo ufw status' for current rules"
+          - "=========================================="
+      tags: always
+
+  handlers:
+    - name: reload ufw
+      ufw:
+        state: reloaded
+      tags:
+        - handlers
+        - firewall
