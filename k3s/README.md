@@ -22,3 +22,12 @@ export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
 ```
 
 [open-webui](https://artifacthub.io/packages/helm/open-webui/open-webui)
+
+```bash
+# Static/Not Maintained
+# helm repo add stable https://charts.helm.sh/stable
+
+helm repo add bitnami https://charts.bitnami.com/bitnami
+helm repo add open-webui https://helm.openwebui.com/
+helm search repo | grep -v DEPRECATED > ../charts.txt
+```
